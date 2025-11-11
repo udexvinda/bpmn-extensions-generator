@@ -141,7 +141,7 @@ st.title("BPMN → Extensions Generator")
 uploaded = st.file_uploader("Upload a .bpmn file (simple is fine — only bpmn:task is enough)", type=["bpmn"])
 
 # Tiny sample WITH DI (always renders)
-sample_exp = st.expander("Need a tiny sample? (Copy the script, save it and drop the file above)")
+sample_exp = st.expander("Need a tiny sample?")
 with sample_exp:
     st.code("""<?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
@@ -355,6 +355,7 @@ Return clean CSV only (no code fences)."""
         except Exception as e:
             st.error(f"CSV parsing failed: {e}")
     show_table_with_download("controls", ctrl_cols, "controls.csv")
+
 
 
 
