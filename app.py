@@ -227,96 +227,142 @@ else:
 st.markdown("---")
 
 # ---------- Tag Generators ----------
+# Persist last results per tab
+for _key in ["kpis", "risks", "raci", "controls", "agents"]:
+    st.session_state.setdefault(_key, None)
+
 tabs = st.tabs(["KPIs", "Risks", "RACI", "Controls", "Agents"])
 
-def tasks_bullets():
+def show_table_with_download(state_key: str, columns: list, download_name: str):
+    """Always show a table. If we have data in session_state, show it and a download button below."""
+    df = st.session_state[state_key]
+    if df is None:
+        st.dataframe(pd.DataFrame(columns=columns), use_container_width=True)
+    else:
+        st.dataframe(df, use_container_width=True)
+        st.download_button(
+            f"⬇️ Download {download_name}",
+            df.to_csv(index=False).encode("utf-8"),
+            file_name=download_name,
+            mime="text/csv",
+            use_container_width=False,
+        )
+
+def ensure_key():
+    if not OPENAI_API_KEY:
+        st.error("OpenAI key is missing. Add `OPENAI_API_KEY` in Secrets to use this feature.")
+        st.stop()
+    return OPENAI_API_KEY
+
+def as_tasks_bullets():
     return "\n".join(f"- {t['element_name']} (id: {t['element_id']})" for t in tasks) or "- (none)"
 
-def show_result(df, filename):
-    st.dataframe(df, use_container_width=True)
-    df_download_button(df, "⬇️ Download CSV", filename)
-
+# ----- KPIs -----
 with tabs[0]:
     st.markdown("Generate **KPI** rows for each task.")
+    cols = ["element_id","element_name","kpi_key","current_value","target_value","owner","last_updated"]
     if st.button("Generate KPIs"):
-        key = require_key()
+        key = ensure_key()
         prompt = f"""You are a BPM KPI designer.
 Given these tasks:
-{tasks_bullets()}
+{as_tasks_bullets()}
 
 Create a CSV with columns:
-element_id,element_name,kpi_key,current_value,target_value,owner,last_updated
+{", ".join(cols)}
 - Use snake_case for kpi_key.
 - current_value/target_value numeric or % where sensible.
 - last_updated: YYYY-MM-DD.
 Return only CSV rows (no markdown fences)."""
-        csv_text = call_openai_rows(MODEL, key, prompt)
-        df = pd.read_csv(io.StringIO(csv_text))
-        show_result(df, "kpis.csv")
+        try:
+            csv_text = call_openai_rows(MODEL, key, prompt)
+            st.session_state["kpis"] = pd.read_csv(io.StringIO(csv_text))
+        except Exception as e:
+            st.exception(e)
+    show_table_with_download("kpis", cols, "kpis.csv")
 
+# ----- Risks -----
 with tabs[1]:
     st.markdown("Generate **Risk Register** rows linked to tasks.")
+    cols = ["element_id","element_name","risk_description","risk_category","likelihood_1to5","impact_1to5","mitigation_owner","control_ref"]
     if st.button("Generate Risks"):
-        key = require_key()
+        key = ensure_key()
         prompt = f"""You are a risk analyst.
 For these tasks:
-{tasks_bullets()}
+{as_tasks_bullets()}
 
 Create a CSV with columns:
-element_id,element_name,risk_description,risk_category,likelihood_1to5,impact_1to5,mitigation_owner,control_ref
+{", ".join(cols)}
 Return only CSV rows."""
-        csv_text = call_openai_rows(MODEL, key, prompt)
-        df = pd.read_csv(io.StringIO(csv_text))
-        show_result(df, "risks.csv")
+        try:
+            csv_text = call_openai_rows(MODEL, key, prompt)
+            st.session_state["risks"] = pd.read_csv(io.StringIO(csv_text))
+        except Exception as e:
+            st.exception(e)
+    show_table_with_download("risks", cols, "risks.csv")
 
+# ----- RACI -----
 with tabs[2]:
     st.markdown("Generate **RACI** matrix entries per task.")
+    cols = ["element_id","element_name","role","responsibility_type"]  # responsibility_type ∈ [R,A,C,I]
     if st.button("Generate RACI"):
-        key = require_key()
+        key = ensure_key()
         prompt = f"""You are a process governance expert.
 For these tasks:
-{tasks_bullets()}
+{as_tasks_bullets()}
 
 Create a CSV with columns:
-element_id,element_name,role,responsibility_type
-# responsibility_type ∈ [R,A,C,I]
-Create 1-3 rows per task. Return only CSV rows."""
-        csv_text = call_openai_rows(MODEL, key, prompt)
-        df = pd.read_csv(io.StringIO(csv_text))
-        show_result(df, "raci.csv")
+{", ".join(cols)}
+Create 1–3 rows per task. Return only CSV rows."""
+        try:
+            csv_text = call_openai_rows(MODEL, key, prompt)
+            st.session_state["raci"] = pd.read_csv(io.StringIO(csv_text))
+        except Exception as e:
+            st.exception(e)
+    show_table_with_download("raci", cols, "raci.csv")
 
+# ----- Controls -----
 with tabs[3]:
     st.markdown("Generate **Controls** mapped to tasks (SOX/ISO/etc.).")
+    cols = ["element_id","element_name","control_name","control_type","frequency","evidence_required","owner"]
     if st.button("Generate Controls"):
-        key = require_key()
+        key = ensure_key()
         prompt = f"""You are an internal controls specialist.
 For these tasks:
-{tasks_bullets()}
+{as_tasks_bullets()}
 
 Create a CSV with columns:
-element_id,element_name,control_name,control_type,frequency,evidence_required,owner
+{", ".join(cols)}
 - control_type: Preventive/Detective/Corrective.
 - frequency: per_txn, daily, weekly, monthly.
 Return only CSV rows."""
-        csv_text = call_openai_rows(MODEL, key, prompt)
-        df = pd.read_csv(io.StringIO(csv_text))
-        show_result(df, "controls.csv")
+        try:
+            csv_text = call_openai_rows(MODEL, key, prompt)
+            st.session_state["controls"] = pd.read_csv(io.StringIO(csv_text))
+        except Exception as e:
+            st.exception(e)
+    show_table_with_download("controls", cols, "controls.csv")
 
+# ----- Agents -----
 with tabs[4]:
     st.markdown("Generate **AI Agent** capability map per task.")
+    cols = ["element_id","element_name","agent_role","capabilities","decision_logic","confidence_threshold","exception_handler","handoff_to"]
     if st.button("Generate Agents"):
-        key = require_key()
+        key = ensure_key()
         prompt = f"""You are an AI solution architect.
 For these tasks:
-{tasks_bullets()}
+{as_tasks_bullets()}
 
 Create a CSV with columns:
-element_id,element_name,agent_role,capabilities,decision_logic,confidence_threshold,exception_handler,handoff_to
-- confidence_threshold: 0.0-1.0
+{", ".join(cols)}
+- confidence_threshold: 0.0–1.0
 Return only CSV rows."""
-        csv_text = call_openai_rows(MODEL, key, prompt)
-        df = pd.read_csv(io.StringIO(csv_text))
-        show_result(df, "agents.csv")
+        try:
+            csv_text = call_openai_rows(MODEL, key, prompt)
+            st.session_state["agents"] = pd.read_csv(io.StringIO(csv_text))
+        except Exception as e:
+            st.exception(e)
+    show_table_with_download("agents", cols, "agents.csv")
+
 
 
 
