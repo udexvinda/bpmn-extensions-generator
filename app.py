@@ -10,14 +10,38 @@ st.markdown("""
 <style>
 .block-container{padding-top:1rem;padding-bottom:1rem}
 #canvas{margin-bottom:.5rem;border:1px solid #ddd;border-radius:8px;height:65vh}
+.status-card{border:1px solid #E6F4EA;background:#E6F4EA;border-radius:10px;padding:.9rem 1rem;display:flex;gap:.6rem;align-items:center}
+.status-card.bad{border-color:#FDE0E0;background:#FDE0E0}
+.status-dot{width:10px;height:10px;border-radius:50%;background:#16a34a}
+.status-card.bad .status-dot{background:#dc2626}
+.status-title{font-weight:600}
 </style>
 """, unsafe_allow_html=True)
+
+# ---------- Config / Secrets ----------
+OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", "")
+MODEL = st.secrets.get("OPENAI_MODEL", "gpt-4o-mini")
+
+# ---------- API Status (replaces AI Settings) ----------
+st.header("API Status")
+if OPENAI_API_KEY:
+    st.markdown(
+        '<div class="status-card"><div class="status-dot"></div>'
+        '<div class="status-title">OpenAI: Connected</div></div>',
+        unsafe_allow_html=True,
+    )
+else:
+    st.markdown(
+        '<div class="status-card bad"><div class="status-dot"></div>'
+        '<div class="status-title">OpenAI: Not configured</div></div>',
+        unsafe_allow_html=True,
+    )
+    st.caption("Add `OPENAI_API_KEY` in **Secrets** (App → Settings → Secrets) to enable the generators.")
 
 # ---------- Helpers ----------
 NS = {"bpmn": "http://www.omg.org/spec/BPMN/20100524/MODEL"}
 
 def parse_named_tasks(bpmn_xml: str):
-    """Return list of {'element_id','element_name'} for each named task."""
     root = ET.fromstring(bpmn_xml.encode("utf-8"))
     out = []
     for el in root.findall(".//bpmn:task", NS):
@@ -25,7 +49,6 @@ def parse_named_tasks(bpmn_xml: str):
         name = el.attrib.get("name") or el.attrib.get("{http://www.omg.org/spec/BPMN/20100524/MODEL}name", "")
         if name:
             out.append({"element_id": tid, "element_name": name})
-    # de-dup by id
     seen, tasks = set(), []
     for r in out:
         if r["element_id"] not in seen:
@@ -46,14 +69,11 @@ def df_download_button(df: pd.DataFrame, label: str, filename: str):
     st.download_button(label, df.to_csv(index=False).encode("utf-8"),
                        file_name=filename, mime="text/csv")
 
-# ---------- Sidebar ----------
-st.sidebar.header("AI Settings")
-default_key = st.secrets.get("OPENAI_API_KEY", "")
-api_key = st.sidebar.text_input("OpenAI API Key", value=("••••••" if default_key else ""), type="password")
-use_secret = (api_key == "••••••" and default_key)
-active_key = default_key if use_secret else (api_key if api_key and api_key!="••••••" else "")
-model = st.sidebar.selectbox("Model", ["gpt-4o-mini", "gpt-4o"], index=0)
-st.sidebar.caption("Tip: add OPENAI_API_KEY in Secrets to avoid typing here.")
+def require_key():
+    if not OPENAI_API_KEY:
+        st.error("OpenAI key is missing. Add `OPENAI_API_KEY` in Secrets to use this feature.")
+        st.stop()
+    return OPENAI_API_KEY
 
 # ---------- Upload ----------
 st.title("BPMN → AI Tag Generator")
@@ -135,7 +155,7 @@ if not uploaded:
 bpmn_xml = uploaded.read().decode("utf-8", errors="ignore")
 tasks = parse_named_tasks(bpmn_xml)
 
-# ---------- Render Diagram (safe for missing DI; no unescaped braces) ----------
+# ---------- Render Diagram (works with/without DI) ----------
 st.subheader("Process Diagram")
 
 bpmn_html = f"""
@@ -207,12 +227,6 @@ st.markdown("---")
 # ---------- Tag Generators ----------
 tabs = st.tabs(["KPIs", "Risks", "RACI", "Controls", "Agents"])
 
-def need_key():
-    if not active_key:
-        st.error("Enter your OpenAI API key in the sidebar.")
-        st.stop()
-    return active_key
-
 def tasks_bullets():
     return "\n".join(f"- {t['element_name']} (id: {t['element_id']})" for t in tasks) or "- (none)"
 
@@ -223,7 +237,7 @@ def show_result(df, filename):
 with tabs[0]:
     st.markdown("Generate **KPI** rows for each task.")
     if st.button("Generate KPIs"):
-        key = need_key()
+        key = require_key()
         prompt = f"""You are a BPM KPI designer.
 Given these tasks:
 {tasks_bullets()}
@@ -234,14 +248,14 @@ element_id,element_name,kpi_key,current_value,target_value,owner,last_updated
 - current_value/target_value numeric or % where sensible.
 - last_updated: YYYY-MM-DD.
 Return only CSV rows (no markdown fences)."""
-        csv_text = call_openai_rows(model, key, prompt)
+        csv_text = call_openai_rows(MODEL, key, prompt)
         df = pd.read_csv(io.StringIO(csv_text))
         show_result(df, "kpis.csv")
 
 with tabs[1]:
     st.markdown("Generate **Risk Register** rows linked to tasks.")
     if st.button("Generate Risks"):
-        key = need_key()
+        key = require_key()
         prompt = f"""You are a risk analyst.
 For these tasks:
 {tasks_bullets()}
@@ -249,14 +263,14 @@ For these tasks:
 Create a CSV with columns:
 element_id,element_name,risk_description,risk_category,likelihood_1to5,impact_1to5,mitigation_owner,control_ref
 Return only CSV rows."""
-        csv_text = call_openai_rows(model, key, prompt)
+        csv_text = call_openai_rows(MODEL, key, prompt)
         df = pd.read_csv(io.StringIO(csv_text))
         show_result(df, "risks.csv")
 
 with tabs[2]:
     st.markdown("Generate **RACI** matrix entries per task.")
     if st.button("Generate RACI"):
-        key = need_key()
+        key = require_key()
         prompt = f"""You are a process governance expert.
 For these tasks:
 {tasks_bullets()}
@@ -265,14 +279,14 @@ Create a CSV with columns:
 element_id,element_name,role,responsibility_type
 # responsibility_type ∈ [R,A,C,I]
 Create 1-3 rows per task. Return only CSV rows."""
-        csv_text = call_openai_rows(model, key, prompt)
+        csv_text = call_openai_rows(MODEL, key, prompt)
         df = pd.read_csv(io.StringIO(csv_text))
         show_result(df, "raci.csv")
 
 with tabs[3]:
     st.markdown("Generate **Controls** mapped to tasks (SOX/ISO/etc.).")
     if st.button("Generate Controls"):
-        key = need_key()
+        key = require_key()
         prompt = f"""You are an internal controls specialist.
 For these tasks:
 {tasks_bullets()}
@@ -282,14 +296,14 @@ element_id,element_name,control_name,control_type,frequency,evidence_required,ow
 - control_type: Preventive/Detective/Corrective.
 - frequency: per_txn, daily, weekly, monthly.
 Return only CSV rows."""
-        csv_text = call_openai_rows(model, key, prompt)
+        csv_text = call_openai_rows(MODEL, key, prompt)
         df = pd.read_csv(io.StringIO(csv_text))
         show_result(df, "controls.csv")
 
 with tabs[4]:
     st.markdown("Generate **AI Agent** capability map per task.")
     if st.button("Generate Agents"):
-        key = need_key()
+        key = require_key()
         prompt = f"""You are an AI solution architect.
 For these tasks:
 {tasks_bullets()}
@@ -298,9 +312,11 @@ Create a CSV with columns:
 element_id,element_name,agent_role,capabilities,decision_logic,confidence_threshold,exception_handler,handoff_to
 - confidence_threshold: 0.0-1.0
 Return only CSV rows."""
-        csv_text = call_openai_rows(model, key, prompt)
+        csv_text = call_openai_rows(MODEL, key, prompt)
         df = pd.read_csv(io.StringIO(csv_text))
         show_result(df, "agents.csv")
+
+
 
 
 
