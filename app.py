@@ -158,28 +158,17 @@ SAMPLE_XML = """<?xml version="1.0" encoding="UTF-8"?>
 </bpmn:definitions>
 """
 
-# 2) Put the uploader on the left and the "Load tiny sample" button flush-right and aligned
+# 2) Put the uploader on the left and the "Load tiny sample" button on the right (same row).
 col_up, col_btn = st.columns([6, 1], gap="small")
-
 with col_up:
     uploaded = st.file_uploader(
         "Upload a .bpmn file (simple is fine — only bpmn:task is enough)",
         type=["bpmn"],
         label_visibility="visible"
     )
-
 with col_btn:
-    # Match height, alignment, and spacing with the "Browse files" button
-    st.markdown("""
-        <style>
-        div[data-testid="stVerticalBlock"] button[kind="secondary"] {
-            margin-top: 34px !important;
-            padding-top: 0.5rem !important;
-            padding-bottom: 0.5rem !important;
-            height: 38px !important;
-        }
-        </style>
-        """, unsafe_allow_html=True)
+    # small spacer so the button aligns vertically with the uploader box
+    st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
     if st.button("Load tiny sample", use_container_width=True):
         st.session_state["use_sample"] = True
 
@@ -360,6 +349,7 @@ Return clean CSV only (no code fences)."""
         except Exception as e:
             st.error(f"CSV parsing failed: {e}")
     show_table_with_download("controls", ctrl_cols, "controls.csv")
+
 
 
 
