@@ -6,7 +6,7 @@ from xml.etree import ElementTree as ET
 import re
 
 # ---------- Page ----------
-st.set_page_config(page_title="BPMN → AI Tag Generator", page_icon="🧩", layout="wide")
+st.set_page_config(page_title="BPMN → Extensions Generator", page_icon="🧩", layout="wide")
 st.markdown("""
 <style>
 .block-container{padding-top:1rem;padding-bottom:1rem}
@@ -347,4 +347,5 @@ Return clean CSV only (no code fences)."""
         except Exception as e:
             st.error(f"CSV parsing failed: {e}")
     show_table_with_download("controls", ctrl_cols, "controls.csv")
+
 
