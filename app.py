@@ -158,17 +158,19 @@ SAMPLE_XML = """<?xml version="1.0" encoding="UTF-8"?>
 </bpmn:definitions>
 """
 
-# 2) Put the "Load tiny sample" button to the LEFT of the uploader
-col_btn, col_up = st.columns([1, 6], gap="small")
-with col_btn:
-    if st.button("Load tiny sample", use_container_width=True):
-        st.session_state["use_sample"] = True
+# 2) Put the uploader on the left and the "Load tiny sample" button on the right (same row).
+col_up, col_btn = st.columns([6, 1], gap="small")
 with col_up:
     uploaded = st.file_uploader(
         "Upload a .bpmn file (simple is fine — only bpmn:task is enough)",
         type=["bpmn"],
         label_visibility="visible"
     )
+with col_btn:
+    # small spacer so the button aligns vertically with the uploader box
+    st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+    if st.button("Load tiny sample", use_container_width=True):
+        st.session_state["use_sample"] = True
 
 # 3) Show the sample code (same XML) in an expander for reference.
 sample_exp = st.expander("Need a tiny sample?")
@@ -347,5 +349,6 @@ Return clean CSV only (no code fences)."""
         except Exception as e:
             st.error(f"CSV parsing failed: {e}")
     show_table_with_download("controls", ctrl_cols, "controls.csv")
+
 
 
