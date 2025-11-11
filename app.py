@@ -45,19 +45,14 @@ with st.sidebar:
 NS = {"bpmn": "http://www.omg.org/spec/BPMN/20100524/MODEL"}
 
 def parse_named_tasks(bpmn_xml: str):
-    """
-    Find all <bpmn:task ... name="..."> anywhere in the XML.
-    Works regardless of where/ how many processes exist.
-    """
+    """Find all <bpmn:task ... name="..."> anywhere in the XML."""
     root = ET.fromstring(bpmn_xml.encode("utf-8"))
     out = []
     for el in root.findall(".//bpmn:task", NS):
         tid = el.attrib.get("id", "")
-        # name may be plain or full-namespaced attr depending on writer
         name = el.attrib.get("name") or el.attrib.get("{http://www.omg.org/spec/BPMN/20100524/MODEL}name", "")
         if name:
             out.append({"element_id": tid, "element_name": name})
-    # de-dupe by element_id
     seen, tasks = set(), []
     for r in out:
         if r["element_id"] not in seen:
@@ -66,15 +61,10 @@ def parse_named_tasks(bpmn_xml: str):
     return tasks
 
 def clean_csv_text(raw: str) -> str:
-    """
-    Strip code fences / labels the model might add (```csv ... ```),
-    and small artifacts that break CSV parsing.
-    """
-    txt = raw.strip()
-    # remove ```...``` fences (with optional language tag)
+    """Strip ``` fences / stray backticks the model might add."""
+    txt = (raw or "").strip()
     txt = re.sub(r"^```(?:csv|CSV)?\s*", "", txt)
     txt = re.sub(r"\s*```$", "", txt)
-    # remove leading backticks/labels the model could echo into header cells
     txt = txt.replace("`", "")
     return txt.strip()
 
@@ -86,7 +76,7 @@ def call_openai_rows(model, api_key, prompt, temperature=0.2):
         messages=[{"role": "user", "content": prompt}],
         temperature=temperature,
     )
-    return clean_csv_text(resp.choices[0].message.content or "")
+    return clean_csv_text(resp.choices[0].message.content)
 
 def df_download_button(df: pd.DataFrame, label: str, filename: str):
     st.download_button(label, df.to_csv(index=False).encode("utf-8"),
@@ -103,8 +93,48 @@ def show_table_with_download(state_key: str, columns: list, filename: str):
     if df is None:
         st.dataframe(pd.DataFrame(columns=columns), use_container_width=True)
     else:
-        st.dataframe(df, use_container_width=True)
-        df_download_button(df, f"⬇️ Download {filename}", filename)
+        # keep only declared columns if present
+        cols = [c for c in columns if c in df.columns]
+        st.dataframe(df[cols] if cols else df, use_container_width=True)
+        df_download_button(df[cols] if cols else df, f"⬇️ Download {filename}", filename)
+
+def tasks_bullets(tasks):
+    return "\n".join(f"- {t['element_name']} (id: {t['element_id']})" for t in tasks) or "- (none)"
+
+# Alignment helpers to force element_id/element_name to match detected tasks
+def build_task_maps(tasks):
+    id_to_name = {t["element_id"]: t["element_name"] for t in tasks}
+    valid_ids = set(id_to_name.keys())
+    valid_names = set(id_to_name.values())
+    name_to_id = {v: k for k, v in id_to_name.items()}
+    return id_to_name, name_to_id, valid_ids, valid_names
+
+def align_to_tasks(df: pd.DataFrame, tasks):
+    """Repair AI CSV so element_id / element_name match detected tasks."""
+    if not {"element_id", "element_name"}.issubset(df.columns):
+        return df
+    id_to_name, name_to_id, valid_ids, valid_names = build_task_maps(tasks)
+
+    df = df.copy()
+    df["element_id"] = df["element_id"].astype(str).str.strip()
+    df["element_name"] = df["element_name"].astype(str).str.strip()
+
+    # Swap if they are reversed
+    mask_swap = df["element_id"].isin(valid_names) & df["element_name"].isin(valid_ids)
+    df.loc[mask_swap, ["element_id", "element_name"]] = df.loc[mask_swap, ["element_name", "element_id"]].values
+
+    # Move id from name column if needed
+    mask_move = ~df["element_id"].isin(valid_ids) & df["element_name"].isin(valid_ids)
+    df.loc[mask_move, "element_id"] = df.loc[mask_move, "element_name"]
+
+    # Map from known names to ids where possible
+    mask_from_name = ~df["element_id"].isin(valid_ids) & df["element_name"].isin(valid_names)
+    df.loc[mask_from_name, "element_id"] = df.loc[mask_from_name, "element_name"].map(name_to_id)
+
+    # Drop rows with unknown ids and set names from id
+    df = df[df["element_id"].isin(valid_ids)].copy()
+    df["element_name"] = df["element_id"].map(id_to_name)
+    return df.reset_index(drop=True)
 
 # ---------- Upload ----------
 st.title("BPMN → AI Tag Generator")
@@ -134,47 +164,15 @@ with sample_exp:
 
   <bpmndi:BPMNDiagram id="BPMNDiagram_1">
     <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="P_Simple">
-
-      <bpmndi:BPMNShape id="Start_di" bpmnElement="Start">
-        <dc:Bounds x="100" y="140" width="36" height="36"/>
-      </bpmndi:BPMNShape>
-
-      <bpmndi:BPMNShape id="Task_A_di" bpmnElement="Task_A">
-        <dc:Bounds x="180" y="120" width="120" height="80"/>
-      </bpmndi:BPMNShape>
-
-      <bpmndi:BPMNShape id="Task_B_di" bpmnElement="Task_B">
-        <dc:Bounds x="340" y="120" width="120" height="80"/>
-      </bpmndi:BPMNShape>
-
-      <bpmndi:BPMNShape id="Task_C_di" bpmnElement="Task_C">
-        <dc:Bounds x="500" y="120" width="120" height="80"/>
-      </bpmndi:BPMNShape>
-
-      <bpmndi:BPMNShape id="End_di" bpmnElement="End">
-        <dc:Bounds x="660" y="140" width="36" height="36"/>
-      </bpmndi:BPMNShape>
-
-      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1">
-        <di:waypoint x="136" y="158"/>
-        <di:waypoint x="180" y="158"/>
-      </bpmndi:BPMNEdge>
-
-      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2">
-        <di:waypoint x="300" y="160"/>
-        <di:waypoint x="340" y="160"/>
-      </bpmndi:BPMNEdge>
-
-      <bpmndi:BPMNEdge id="f3_di" bpmnElement="f3">
-        <di:waypoint x="460" y="160"/>
-        <di:waypoint x="500" y="160"/>
-      </bpmndi:BPMNEdge>
-
-      <bpmndi:BPMNEdge id="f4_di" bpmnElement="f4">
-        <di:waypoint x="620" y="158"/>
-        <di:waypoint x="660" y="158"/>
-      </bpmndi:BPMNEdge>
-
+      <bpmndi:BPMNShape id="Start_di" bpmnElement="Start"><dc:Bounds x="100" y="140" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_A_di" bpmnElement="Task_A"><dc:Bounds x="180" y="120" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_B_di" bpmnElement="Task_B"><dc:Bounds x="340" y="120" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_C_di" bpmnElement="Task_C"><dc:Bounds x="500" y="120" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_di" bpmnElement="End"><dc:Bounds x="660" y="140" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="136" y="158"/><di:waypoint x="180" y="158"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="300" y="160"/><di:waypoint x="340" y="160"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f3_di" bpmnElement="f3"><di:waypoint x="460" y="160"/><di:waypoint x="500" y="160"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f4_di" bpmnElement="f4"><di:waypoint x="620" y="158"/><di:waypoint x="660" y="158"/></bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>
 </bpmn:definitions>""", language="xml")
@@ -188,17 +186,11 @@ tasks = parse_named_tasks(bpmn_xml)
 
 # ---------- Render Diagram (works with/without DI) ----------
 st.subheader("Process Diagram")
-
 bpmn_html = f"""
 <div id="canvas" style="height:65vh;border:1px solid #ddd;border-radius:8px;"></div>
 
-<!-- Viewer -->
 <script src="https://unpkg.com/bpmn-js@10.2.1/dist/bpmn-viewer.production.min.js"></script>
-
-<!-- bpmn-moddle UMD -->
 <script src="https://unpkg.com/bpmn-moddle@7.1.3/dist/bpmn-moddle.umd.js"></script>
-
-<!-- Try BOTH common UMD builds for bpmn-auto-layout -->
 <script src="https://cdn.jsdelivr.net/npm/bpmn-auto-layout@0.7.0/dist/bpmn-auto-layout.umd.js"></script>
 <script src="https://unpkg.com/bpmn-auto-layout@0.7.0/dist/bpmn-auto-layout.umd.js"></script>
 
@@ -227,8 +219,8 @@ bpmn_html = f"""
 
         const moddle = new ModdleCtor();
         const res = await moddle.fromXML(xmlIn);
-        const rootElement = res.rootElement;       // Definitions
-        const laid = await autoLayoutFn(rootElement); // -> {{ xml }}
+        const rootElement = res.rootElement;
+        const laid = await autoLayoutFn(rootElement);
         await viewer.importXML(laid.xml);
       }}
       viewer.get('canvas').zoom('fit-viewport');
@@ -252,15 +244,15 @@ else:
 
 st.markdown("---")
 
-# ---------- Tag Generators (KPIs, Risks, RACI, Controls) ----------
+# ---------- Tag Generators ----------
 # Persist last results
 for _key in ["kpis", "risks", "raci", "controls"]:
     st.session_state.setdefault(_key, None)
 
 tabs = st.tabs(["KPIs", "Risks", "RACI", "Controls"])
 
-def tasks_bullets():
-    return "\n".join(f"- {t['element_name']} (id: {t['element_id']})" for t in tasks) or "- (none)"
+# Precompute mapping lines for stricter prompts
+mapping_lines = "\n".join(f"{t['element_id']},{t['element_name']}" for t in tasks)
 
 # --- KPIs ---
 with tabs[0]:
@@ -269,18 +261,22 @@ with tabs[0]:
     if st.button("Generate KPIs"):
         key = require_key()
         prompt = f"""You are a BPM KPI designer.
-Given these tasks:
-{tasks_bullets()}
 
-Create a CSV with columns:
+Use exactly these task identifiers and names (do not invent or renumber):
+element_id,element_name
+{mapping_lines}
+
+Create a CSV with columns (in this exact order):
 {", ".join(kpi_cols)}
 - Use snake_case for kpi_key.
 - current_value/target_value numeric or % where sensible.
 - last_updated: YYYY-MM-DD.
-Return only CSV rows (no markdown fences)."""
+Return only clean CSV (no code fences)."""
         try:
             csv_text = call_openai_rows(MODEL, key, prompt)
-            st.session_state["kpis"] = pd.read_csv(io.StringIO(csv_text))
+            df = pd.read_csv(io.StringIO(csv_text))
+            df = align_to_tasks(df, tasks)
+            st.session_state["kpis"] = df
         except Exception as e:
             st.error(f"CSV parsing failed: {e}")
     show_table_with_download("kpis", kpi_cols, "kpis.csv")
@@ -292,16 +288,20 @@ with tabs[1]:
     if st.button("Generate Risks"):
         key = require_key()
         prompt = f"""You are a risk analyst.
-For these tasks:
-{tasks_bullets()}
 
-Create a CSV with columns:
+Use exactly these task identifiers and names (do not invent or renumber):
+element_id,element_name
+{mapping_lines}
+
+Create a CSV with columns (in this exact order):
 {", ".join(risk_cols)}
-Ensure clean, comma-separated values and a single header row.
+Ensure comma-separated values and a single header row.
 Return pure CSV — no code fences."""
         try:
             csv_text = call_openai_rows(MODEL, key, prompt)
-            st.session_state["risks"] = pd.read_csv(io.StringIO(csv_text))
+            df = pd.read_csv(io.StringIO(csv_text))
+            df = align_to_tasks(df, tasks)
+            st.session_state["risks"] = df
         except Exception as e:
             st.error(f"CSV parsing failed: {e}")
     show_table_with_download("risks", risk_cols, "risks.csv")
@@ -312,16 +312,20 @@ with tabs[2]:
     raci_cols = ["element_id","element_name","role","responsibility_type"]
     if st.button("Generate RACI"):
         key = require_key()
-        prompt = f"""For the following process tasks:
-{tasks_bullets()}
+        prompt = f"""For the following process tasks use the exact ids and names below.
+Do not invent or renumber.
 
-Generate a CSV table for RACI roles.
-Columns: {", ".join(raci_cols)}.
-Create 1–3 rows per task, with responsibility_type ∈ [R, A, C, I].
+element_id,element_name
+{mapping_lines}
+
+Generate a CSV table. Columns (in order): {", ".join(raci_cols)}.
+Create 1–3 rows per task, responsibility_type ∈ [R, A, C, I].
 Return clean CSV only (no fences)."""
         try:
             csv_text = call_openai_rows(MODEL, key, prompt)
-            st.session_state["raci"] = pd.read_csv(io.StringIO(csv_text))
+            df = pd.read_csv(io.StringIO(csv_text))
+            df = align_to_tasks(df, tasks)
+            st.session_state["raci"] = df
         except Exception as e:
             st.error(f"CSV parsing failed: {e}")
     show_table_with_download("raci", raci_cols, "raci.csv")
@@ -333,19 +337,25 @@ with tabs[3]:
     if st.button("Generate Controls"):
         key = require_key()
         prompt = f"""Generate a CSV table for control mappings per task.
-Tasks:
-{tasks_bullets()}
 
-Columns: {", ".join(ctrl_cols)}.
-- control_type: Preventive/Detective/Corrective.
-- frequency: per_txn, daily, weekly, monthly.
+Use exactly these task identifiers and names (do not invent or renumber):
+element_id,element_name
+{mapping_lines}
+
+Columns (in this exact order):
+{", ".join(ctrl_cols)}
+- control_type: Preventive/Detective/Corrective
+- frequency: per_txn, daily, weekly, monthly
 Return clean CSV only (no code fences)."""
         try:
             csv_text = call_openai_rows(MODEL, key, prompt)
-            st.session_state["controls"] = pd.read_csv(io.StringIO(csv_text))
+            df = pd.read_csv(io.StringIO(csv_text))
+            df = align_to_tasks(df, tasks)  # <-- ensures element_name matches Detected Tasks
+            st.session_state["controls"] = df
         except Exception as e:
             st.error(f"CSV parsing failed: {e}")
     show_table_with_download("controls", ctrl_cols, "controls.csv")
+
 
 
 
