@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 from xml.etree import ElementTree as ET
 
-# ------------------ Page ------------------
+# ---------- Page ----------
 st.set_page_config(page_title="BPMN → AI Tag Generator", page_icon="🧩", layout="wide")
 st.markdown("""
 <style>
@@ -13,7 +13,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ------------------ Helpers ------------------
+# ---------- Helpers ----------
 NS = {"bpmn": "http://www.omg.org/spec/BPMN/20100524/MODEL"}
 
 def parse_named_tasks(bpmn_xml: str):
@@ -46,21 +46,20 @@ def df_download_button(df: pd.DataFrame, label: str, filename: str):
     st.download_button(label, df.to_csv(index=False).encode("utf-8"),
                        file_name=filename, mime="text/csv")
 
-# ------------------ Sidebar: AI settings ------------------
+# ---------- Sidebar ----------
 st.sidebar.header("AI Settings")
 default_key = st.secrets.get("OPENAI_API_KEY", "")
 api_key = st.sidebar.text_input("OpenAI API Key", value=("••••••" if default_key else ""), type="password")
 use_secret = (api_key == "••••••" and default_key)
 active_key = default_key if use_secret else (api_key if api_key and api_key!="••••••" else "")
-
 model = st.sidebar.selectbox("Model", ["gpt-4o-mini", "gpt-4o"], index=0)
 st.sidebar.caption("Tip: add OPENAI_API_KEY in Secrets to avoid typing here.")
 
-# ------------------ Upload BPMN ------------------
+# ---------- Upload ----------
 st.title("BPMN → AI Tag Generator")
 uploaded = st.file_uploader("Upload a .bpmn file (simple is fine — only bpmn:task is enough)", type=["bpmn"])
 
-# --- Tiny sample WITH DI (renders anywhere) ---
+# Tiny sample WITH DI (always renders)
 sample_exp = st.expander("Need a tiny sample?")
 with sample_exp:
     st.code("""<?xml version="1.0" encoding="UTF-8"?>
@@ -136,7 +135,7 @@ if not uploaded:
 bpmn_xml = uploaded.read().decode("utf-8", errors="ignore")
 tasks = parse_named_tasks(bpmn_xml)
 
-# ------------------ Render Diagram (works with/without DI) ------------------
+# ---------- Render Diagram (safe for missing DI; no unescaped braces) ----------
 st.subheader("Process Diagram")
 
 bpmn_html = f"""
@@ -161,7 +160,7 @@ bpmn_html = f"""
     (window.BpmnModdle && (window.BpmnModdle.BpmnModdle || window.BpmnModdle.default || window.BpmnModdle))
     || null;
 
-  // bpmn-auto-layout can export as function or { layout }
+  // May export a function or an object with a .layout function
   const autoLayoutFn =
     (window.BpmnAutoLayout && (window.BpmnAutoLayout.layout || window.BpmnAutoLayout)) ||
     (window.bpmnAutoLayout && (window.bpmnAutoLayout.layout || window.bpmnAutoLayout)) ||
@@ -196,7 +195,7 @@ bpmn_html = f"""
 """
 st.components.v1.html(bpmn_html, height=520, scrolling=True)
 
-# ------------------ Tasks list ------------------
+# ---------- Tasks ----------
 st.subheader("Detected Tasks")
 if tasks:
     st.dataframe(pd.DataFrame(tasks), use_container_width=True)
@@ -205,7 +204,7 @@ else:
 
 st.markdown("---")
 
-# ------------------ Tag Generators ------------------
+# ---------- Tag Generators ----------
 tabs = st.tabs(["KPIs", "Risks", "RACI", "Controls", "Agents"])
 
 def need_key():
@@ -221,7 +220,6 @@ def show_result(df, filename):
     st.dataframe(df, use_container_width=True)
     df_download_button(df, "⬇️ Download CSV", filename)
 
-# KPIs
 with tabs[0]:
     st.markdown("Generate **KPI** rows for each task.")
     if st.button("Generate KPIs"):
@@ -240,7 +238,6 @@ Return only CSV rows (no markdown fences)."""
         df = pd.read_csv(io.StringIO(csv_text))
         show_result(df, "kpis.csv")
 
-# Risks
 with tabs[1]:
     st.markdown("Generate **Risk Register** rows linked to tasks.")
     if st.button("Generate Risks"):
@@ -256,7 +253,6 @@ Return only CSV rows."""
         df = pd.read_csv(io.StringIO(csv_text))
         show_result(df, "risks.csv")
 
-# RACI
 with tabs[2]:
     st.markdown("Generate **RACI** matrix entries per task.")
     if st.button("Generate RACI"):
@@ -266,13 +262,13 @@ For these tasks:
 {tasks_bullets()}
 
 Create a CSV with columns:
-element_id,element_name,role,responsibility_type   # responsibility_type in [R,A,C,I]
+element_id,element_name,role,responsibility_type
+# responsibility_type ∈ [R,A,C,I]
 Create 1-3 rows per task. Return only CSV rows."""
         csv_text = call_openai_rows(model, key, prompt)
         df = pd.read_csv(io.StringIO(csv_text))
         show_result(df, "raci.csv")
 
-# Controls
 with tabs[3]:
     st.markdown("Generate **Controls** mapped to tasks (SOX/ISO/etc.).")
     if st.button("Generate Controls"):
@@ -290,7 +286,6 @@ Return only CSV rows."""
         df = pd.read_csv(io.StringIO(csv_text))
         show_result(df, "controls.csv")
 
-# Agents
 with tabs[4]:
     st.markdown("Generate **AI Agent** capability map per task.")
     if st.button("Generate Agents"):
@@ -306,5 +301,7 @@ Return only CSV rows."""
         csv_text = call_openai_rows(model, key, prompt)
         df = pd.read_csv(io.StringIO(csv_text))
         show_result(df, "agents.csv")
+
+
 
 
