@@ -10,7 +10,7 @@ st.markdown("""
 <style>
 .block-container{padding-top:1rem;padding-bottom:1rem}
 #canvas{margin-bottom:.5rem;border:1px solid #ddd;border-radius:8px;height:65vh}
-.status-card{border:1px solid #E6F4EA;background:#E6F4EA;border-radius:10px;padding:.9rem 1rem;display:flex;gap:.6rem;align-items:center}
+.status-card{border:1px solid #E6F4EA;background:#E6F4EA;border-radius:10px;padding:.9rem 1rem;display:flex;gap:.6rem;align-items:center;margin-bottom:1rem}
 .status-card.bad{border-color:#FDE0E0;background:#FDE0E0}
 .status-dot{width:10px;height:10px;border-radius:50%;background:#16a34a}
 .status-card.bad .status-dot{background:#dc2626}
@@ -22,23 +22,25 @@ st.markdown("""
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", "")
 MODEL = st.secrets.get("OPENAI_MODEL", "gpt-4o-mini")
 
-# ---------- API Status (replaces AI Settings) ----------
-st.header("API Status")
-if OPENAI_API_KEY:
-    st.markdown(
-        '<div class="status-card"><div class="status-dot"></div>'
-        '<div class="status-title">OpenAI: Connected</div></div>',
-        unsafe_allow_html=True,
-    )
-else:
-    st.markdown(
-        '<div class="status-card bad"><div class="status-dot"></div>'
-        '<div class="status-title">OpenAI: Not configured</div></div>',
-        unsafe_allow_html=True,
-    )
-    st.caption("Add `OPENAI_API_KEY` in **Secrets** (App → Settings → Secrets) to enable the generators.")
+# ---------- Sidebar: API Status ----------
+with st.sidebar:
+    st.header("API Status")
+    if OPENAI_API_KEY:
+        st.markdown(
+            '<div class="status-card"><div class="status-dot"></div>'
+            '<div class="status-title">OpenAI: Connected</div></div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"**Model:** `{MODEL}`")
+    else:
+        st.markdown(
+            '<div class="status-card bad"><div class="status-dot"></div>'
+            '<div class="status-title">OpenAI: Not Configured</div></div>',
+            unsafe_allow_html=True,
+        )
+        st.caption("Add `OPENAI_API_KEY` in **Secrets** (App → Settings → Secrets).")
 
-# ---------- Helpers ----------
+# ---------- Helper Function ----------
 NS = {"bpmn": "http://www.omg.org/spec/BPMN/20100524/MODEL"}
 
 def parse_named_tasks(bpmn_xml: str):
@@ -315,6 +317,7 @@ Return only CSV rows."""
         csv_text = call_openai_rows(MODEL, key, prompt)
         df = pd.read_csv(io.StringIO(csv_text))
         show_result(df, "agents.csv")
+
 
 
 
