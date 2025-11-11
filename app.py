@@ -6,7 +6,7 @@ from xml.etree import ElementTree as ET
 import re
 
 # ---------- Page ----------
-st.set_page_config(page_title="BPMN → Extensions Generator", page_icon="🧩", layout="wide")
+st.set_page_config(page_title="BPMN → AI Tag Generator", page_icon="🧩", layout="wide")
 st.markdown("""
 <style>
 .block-container{padding-top:1rem;padding-bottom:1rem}
@@ -45,7 +45,6 @@ with st.sidebar:
 NS = {"bpmn": "http://www.omg.org/spec/BPMN/20100524/MODEL"}
 
 def parse_named_tasks(bpmn_xml: str):
-    """Find all <bpmn:task ... name="..."> anywhere in the XML."""
     root = ET.fromstring(bpmn_xml.encode("utf-8"))
     out = []
     for el in root.findall(".//bpmn:task", NS):
@@ -56,12 +55,10 @@ def parse_named_tasks(bpmn_xml: str):
     seen, tasks = set(), []
     for r in out:
         if r["element_id"] not in seen:
-            tasks.append(r)
-            seen.add(r["element_id"])
+            tasks.append(r); seen.add(r["element_id"])
     return tasks
 
 def clean_csv_text(raw: str) -> str:
-    """Strip ``` fences / stray backticks the model might add."""
     txt = (raw or "").strip()
     txt = re.sub(r"^```(?:csv|CSV)?\s*", "", txt)
     txt = re.sub(r"\s*```$", "", txt)
@@ -73,7 +70,7 @@ def call_openai_rows(model, api_key, prompt, temperature=0.2):
     client = OpenAI(api_key=api_key)
     resp = client.chat.completions.create(
         model=model,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[{"role":"user","content":prompt}],
         temperature=temperature,
     )
     return clean_csv_text(resp.choices[0].message.content)
@@ -93,7 +90,6 @@ def show_table_with_download(state_key: str, columns: list, filename: str):
     if df is None:
         st.dataframe(pd.DataFrame(columns=columns), use_container_width=True)
     else:
-        # keep only declared columns if present
         cols = [c for c in columns if c in df.columns]
         st.dataframe(df[cols] if cols else df, use_container_width=True)
         df_download_button(df[cols] if cols else df, f"⬇️ Download {filename}", filename)
@@ -101,7 +97,6 @@ def show_table_with_download(state_key: str, columns: list, filename: str):
 def tasks_bullets(tasks):
     return "\n".join(f"- {t['element_name']} (id: {t['element_id']})" for t in tasks) or "- (none)"
 
-# Alignment helpers to force element_id/element_name to match detected tasks
 def build_task_maps(tasks):
     id_to_name = {t["element_id"]: t["element_name"] for t in tasks}
     valid_ids = set(id_to_name.keys())
@@ -110,46 +105,32 @@ def build_task_maps(tasks):
     return id_to_name, name_to_id, valid_ids, valid_names
 
 def align_to_tasks(df: pd.DataFrame, tasks):
-    """Repair AI CSV so element_id / element_name match detected tasks."""
     if not {"element_id", "element_name"}.issubset(df.columns):
         return df
     id_to_name, name_to_id, valid_ids, valid_names = build_task_maps(tasks)
-
     df = df.copy()
     df["element_id"] = df["element_id"].astype(str).str.strip()
     df["element_name"] = df["element_name"].astype(str).str.strip()
-
-    # Swap if they are reversed
     mask_swap = df["element_id"].isin(valid_names) & df["element_name"].isin(valid_ids)
     df.loc[mask_swap, ["element_id", "element_name"]] = df.loc[mask_swap, ["element_name", "element_id"]].values
-
-    # Move id from name column if needed
     mask_move = ~df["element_id"].isin(valid_ids) & df["element_name"].isin(valid_ids)
     df.loc[mask_move, "element_id"] = df.loc[mask_move, "element_name"]
-
-    # Map from known names to ids where possible
     mask_from_name = ~df["element_id"].isin(valid_ids) & df["element_name"].isin(valid_names)
     df.loc[mask_from_name, "element_id"] = df.loc[mask_from_name, "element_name"].map(name_to_id)
-
-    # Drop rows with unknown ids and set names from id
     df = df[df["element_id"].isin(valid_ids)].copy()
     df["element_name"] = df["element_id"].map(id_to_name)
     return df.reset_index(drop=True)
 
 # ---------- Upload ----------
 st.title("BPMN → Extensions Generator")
-uploaded = st.file_uploader("Upload a .bpmn file (simple is fine — only bpmn:task is enough)", type=["bpmn"])
 
-# Tiny sample WITH DI (always renders)
-sample_exp = st.expander("Need a tiny sample?")
-with sample_exp:
-    st.code("""<?xml version="1.0" encoding="UTF-8"?>
+# 1) Define the tiny sample once so we can re-use it in both the expander and the button.
+SAMPLE_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
   xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
   xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
   xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
   targetNamespace="http://bpmn.io/schema/bpmn">
-
   <bpmn:process id="P_Simple" name="Simple Process" isExecutable="false">
     <bpmn:startEvent id="Start"/>
     <bpmn:task id="Task_A" name="Capture Request"/>
@@ -161,54 +142,69 @@ with sample_exp:
     <bpmn:sequenceFlow id="f3" sourceRef="Task_B" targetRef="Task_C"/>
     <bpmn:sequenceFlow id="f4" sourceRef="Task_C" targetRef="End"/>
   </bpmn:process>
-
   <bpmndi:BPMNDiagram id="BPMNDiagram_1">
     <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="P_Simple">
-      <bpmndi:BPMNShape id="Start_di" bpmnElement="Start"><dc:Bounds x="100" y="140" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_di"  bpmnElement="Start"><dc:Bounds x="100" y="140" width="36" height="36"/></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Task_A_di" bpmnElement="Task_A"><dc:Bounds x="180" y="120" width="120" height="80"/></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Task_B_di" bpmnElement="Task_B"><dc:Bounds x="340" y="120" width="120" height="80"/></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Task_C_di" bpmnElement="Task_C"><dc:Bounds x="500" y="120" width="120" height="80"/></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="End_di" bpmnElement="End"><dc:Bounds x="660" y="140" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_di"   bpmnElement="End"><dc:Bounds x="660" y="140" width="36" height="36"/></bpmndi:BPMNShape>
       <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="136" y="158"/><di:waypoint x="180" y="158"/></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="300" y="160"/><di:waypoint x="340" y="160"/></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="f3_di" bpmnElement="f3"><di:waypoint x="460" y="160"/><di:waypoint x="500" y="160"/></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="f4_di" bpmnElement="f4"><di:waypoint x="620" y="158"/><di:waypoint x="660" y="158"/></bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>
-</bpmn:definitions>""", language="xml")
+</bpmn:definitions>
+"""
 
-if not uploaded:
-    st.info("Upload a BPMN file to proceed.")
+# 2) Put the uploader and the "Load tiny sample" button on the same row.
+col_up, col_btn = st.columns([6, 1], gap="small")
+with col_up:
+    uploaded = st.file_uploader(
+        "Upload a .bpmn file (simple is fine — only bpmn:task is enough)",
+        type=["bpmn"],
+        label_visibility="visible"
+    )
+with col_btn:
+    if st.button("Load tiny sample", use_container_width=True):
+        st.session_state["use_sample"] = True
+
+# 3) Show the sample code (same XML) in an expander for reference.
+sample_exp = st.expander("Need a tiny sample?")
+with sample_exp:
+    st.code(SAMPLE_XML, language="xml")
+
+# 4) Decide the BPMN source:
+bpmn_xml = None
+if st.session_state.get("use_sample"):
+    bpmn_xml = SAMPLE_XML
+elif uploaded is not None:
+    bpmn_xml = uploaded.read().decode("utf-8", errors="ignore")
+
+if not bpmn_xml:
+    st.info("Upload a BPMN file to proceed, or click **Load tiny sample**.")
     st.stop()
 
-bpmn_xml = uploaded.read().decode("utf-8", errors="ignore")
 tasks = parse_named_tasks(bpmn_xml)
 
-# ---------- Render Diagram (works with/without DI) ----------
+# ---------- Render Diagram ----------
 st.subheader("Process Diagram")
 bpmn_html = f"""
 <div id="canvas" style="height:65vh;border:1px solid #ddd;border-radius:8px;"></div>
-
 <script src="https://unpkg.com/bpmn-js@10.2.1/dist/bpmn-viewer.production.min.js"></script>
 <script src="https://unpkg.com/bpmn-moddle@7.1.3/dist/bpmn-moddle.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bpmn-auto-layout@0.7.0/dist/bpmn-auto-layout.umd.js"></script>
 <script src="https://unpkg.com/bpmn-auto-layout@0.7.0/dist/bpmn-auto-layout.umd.js"></script>
-
 <script>
   const xmlIn = {json.dumps(bpmn_xml)};
   const viewer = new BpmnJS({{ container: '#canvas' }});
-
   const ModdleCtor =
-    (window.BpmnModdle && (window.BpmnModdle.BpmnModdle || window.BpmnModdle.default || window.BpmnModdle))
-    || null;
-
+    (window.BpmnModdle && (window.BpmnModdle.BpmnModdle || window.BpmnModdle.default || window.BpmnModdle)) || null;
   const autoLayoutFn =
     (window.BpmnAutoLayout && (window.BpmnAutoLayout.layout || window.BpmnAutoLayout)) ||
-    (window.bpmnAutoLayout && (window.bpmnAutoLayout.layout || window.bpmnAutoLayout)) ||
-    null;
-
+    (window.bpmnAutoLayout && (window.bpmnAutoLayout.layout || window.bpmnAutoLayout)) || null;
   const hasDI = /<\\s*bpmndi:BPMNDiagram[\\s>]/.test(xmlIn);
-
   (async () => {{
     try {{
       if (hasDI) {{
@@ -216,7 +212,6 @@ bpmn_html = f"""
       }} else {{
         if (!ModdleCtor) throw new Error('BpmnModdle UMD not found');
         if (!autoLayoutFn) throw new Error('BpmnAutoLayout UMD not found');
-
         const moddle = new ModdleCtor();
         const res = await moddle.fromXML(xmlIn);
         const rootElement = res.rootElement;
@@ -245,16 +240,13 @@ else:
 st.markdown("---")
 
 # ---------- Tag Generators ----------
-# Persist last results
 for _key in ["kpis", "risks", "raci", "controls"]:
     st.session_state.setdefault(_key, None)
 
 tabs = st.tabs(["KPIs", "Risks", "RACI", "Controls"])
-
-# Precompute mapping lines for stricter prompts
 mapping_lines = "\n".join(f"{t['element_id']},{t['element_name']}" for t in tasks)
 
-# --- KPIs ---
+# KPIs
 with tabs[0]:
     st.markdown("Generate **KPI** rows for each task.")
     kpi_cols = ["element_id","element_name","kpi_key","current_value","target_value","owner","last_updated"]
@@ -281,7 +273,7 @@ Return only clean CSV (no code fences)."""
             st.error(f"CSV parsing failed: {e}")
     show_table_with_download("kpis", kpi_cols, "kpis.csv")
 
-# --- Risks ---
+# Risks
 with tabs[1]:
     st.markdown("Generate **Risk Register** rows linked to tasks.")
     risk_cols = ["element_id","element_name","risk_description","risk_category","likelihood_1to5","impact_1to5","mitigation_owner","control_ref"]
@@ -306,7 +298,7 @@ Return pure CSV — no code fences."""
             st.error(f"CSV parsing failed: {e}")
     show_table_with_download("risks", risk_cols, "risks.csv")
 
-# --- RACI ---
+# RACI
 with tabs[2]:
     st.markdown("Generate **RACI** matrix entries per task.")
     raci_cols = ["element_id","element_name","role","responsibility_type"]
@@ -330,7 +322,7 @@ Return clean CSV only (no fences)."""
             st.error(f"CSV parsing failed: {e}")
     show_table_with_download("raci", raci_cols, "raci.csv")
 
-# --- Controls ---
+# Controls
 with tabs[3]:
     st.markdown("Generate **Controls** mapped to tasks (SOX/ISO/etc.).")
     ctrl_cols = ["element_id","element_name","control_name","control_type","frequency","evidence_required","owner"]
@@ -350,25 +342,8 @@ Return clean CSV only (no code fences)."""
         try:
             csv_text = call_openai_rows(MODEL, key, prompt)
             df = pd.read_csv(io.StringIO(csv_text))
-            df = align_to_tasks(df, tasks)  # <-- ensures element_name matches Detected Tasks
+            df = align_to_tasks(df, tasks)  # ensures names match "Detected Tasks"
             st.session_state["controls"] = df
         except Exception as e:
             st.error(f"CSV parsing failed: {e}")
     show_table_with_download("controls", ctrl_cols, "controls.csv")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
