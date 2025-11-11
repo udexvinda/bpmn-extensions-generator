@@ -169,11 +169,14 @@ with col_up:
     )
 
 with col_btn:
-    # Match Streamlit's internal vertical offset for the Browse button
+    # Match height, alignment, and spacing with the "Browse files" button
     st.markdown("""
         <style>
         div[data-testid="stVerticalBlock"] button[kind="secondary"] {
-            margin-top: 39px !important;
+            margin-top: 34px !important;
+            padding-top: 0.5rem !important;
+            padding-bottom: 0.5rem !important;
+            height: 38px !important;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -357,6 +360,7 @@ Return clean CSV only (no code fences)."""
         except Exception as e:
             st.error(f"CSV parsing failed: {e}")
     show_table_with_download("controls", ctrl_cols, "controls.csv")
+
 
 
 
