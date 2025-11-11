@@ -60,6 +60,7 @@ st.sidebar.caption("Tip: add OPENAI_API_KEY in Secrets to avoid typing here.")
 st.title("BPMN → AI Tag Generator")
 uploaded = st.file_uploader("Upload a .bpmn file (simple is fine — only bpmn:task is enough)", type=["bpmn"])
 
+# --- Tiny sample WITH DI (renders anywhere) ---
 sample_exp = st.expander("Need a tiny sample?")
 with sample_exp:
     st.code("""<?xml version="1.0" encoding="UTF-8"?>
@@ -68,6 +69,7 @@ with sample_exp:
   xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
   xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
   targetNamespace="http://bpmn.io/schema/bpmn">
+
   <bpmn:process id="P_Simple" name="Simple Process" isExecutable="false">
     <bpmn:startEvent id="Start"/>
     <bpmn:task id="Task_A" name="Capture Request"/>
@@ -79,6 +81,52 @@ with sample_exp:
     <bpmn:sequenceFlow id="f3" sourceRef="Task_B" targetRef="Task_C"/>
     <bpmn:sequenceFlow id="f4" sourceRef="Task_C" targetRef="End"/>
   </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="P_Simple">
+
+      <bpmndi:BPMNShape id="Start_di" bpmnElement="Start">
+        <dc:Bounds x="100" y="140" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Task_A_di" bpmnElement="Task_A">
+        <dc:Bounds x="180" y="120" width="120" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Task_B_di" bpmnElement="Task_B">
+        <dc:Bounds x="340" y="120" width="120" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Task_C_di" bpmnElement="Task_C">
+        <dc:Bounds x="500" y="120" width="120" height="80"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="End_di" bpmnElement="End">
+        <dc:Bounds x="660" y="140" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1">
+        <di:waypoint x="136" y="158"/>
+        <di:waypoint x="180" y="158"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2">
+        <di:waypoint x="300" y="160"/>
+        <di:waypoint x="340" y="160"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="f3_di" bpmnElement="f3">
+        <di:waypoint x="460" y="160"/>
+        <di:waypoint x="500" y="160"/>
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="f4_di" bpmnElement="f4">
+        <di:waypoint x="620" y="158"/>
+        <di:waypoint x="660" y="158"/>
+      </bpmndi:BPMNEdge>
+
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
 </bpmn:definitions>""", language="xml")
 
 if not uploaded:
@@ -88,7 +136,7 @@ if not uploaded:
 bpmn_xml = uploaded.read().decode("utf-8", errors="ignore")
 tasks = parse_named_tasks(bpmn_xml)
 
-# ------------------ Render Diagram (guard UMD & generate DI if missing) ------------------
+# ------------------ Render Diagram (works with/without DI) ------------------
 st.subheader("Process Diagram")
 
 bpmn_html = f"""
@@ -97,11 +145,12 @@ bpmn_html = f"""
 <!-- Viewer -->
 <script src="https://unpkg.com/bpmn-js@10.2.1/dist/bpmn-viewer.production.min.js"></script>
 
-<!-- Correct UMD for bpmn-moddle -->
+<!-- bpmn-moddle UMD -->
 <script src="https://unpkg.com/bpmn-moddle@7.1.3/dist/bpmn-moddle.umd.js"></script>
 
-<!-- Auto layout -->
-<script src="https://unpkg.com/bpmn-auto-layout@0.7.0/dist/index.umd.js"></script>
+<!-- Try BOTH common UMD builds for bpmn-auto-layout -->
+<script src="https://cdn.jsdelivr.net/npm/bpmn-auto-layout@0.7.0/dist/bpmn-auto-layout.umd.js"></script>
+<script src="https://unpkg.com/bpmn-auto-layout@0.7.0/dist/bpmn-auto-layout.umd.js"></script>
 
 <script>
   const xmlIn = {json.dumps(bpmn_xml)};
@@ -112,9 +161,11 @@ bpmn_html = f"""
     (window.BpmnModdle && (window.BpmnModdle.BpmnModdle || window.BpmnModdle.default || window.BpmnModdle))
     || null;
 
+  // bpmn-auto-layout can export as function or { layout }
   const autoLayoutFn =
-    (window.BpmnAutoLayout && (window.BpmnAutoLayout.layout || window.BpmnAutoLayout.default || window.BpmnAutoLayout))
-    || null;
+    (window.BpmnAutoLayout && (window.BpmnAutoLayout.layout || window.BpmnAutoLayout)) ||
+    (window.bpmnAutoLayout && (window.bpmnAutoLayout.layout || window.bpmnAutoLayout)) ||
+    null;
 
   // Simple DI detection
   const hasDI = /<\\s*bpmndi:BPMNDiagram[\\s>]/.test(xmlIn);
@@ -128,9 +179,9 @@ bpmn_html = f"""
         if (!autoLayoutFn) throw new Error('BpmnAutoLayout UMD not found');
 
         const moddle = new ModdleCtor();
-        const res = await moddle.fromXML(xmlIn);     // {{ rootElement, warnings }}
-        const rootElement = res.rootElement;         // Definitions
-        const laid = await autoLayoutFn(rootElement);// -> {{ xml }}
+        const res = await moddle.fromXML(xmlIn);   // {{ rootElement }}
+        const rootElement = res.rootElement;       // Definitions
+        const laid = await autoLayoutFn(rootElement); // -> {{ xml }}
         await viewer.importXML(laid.xml);
       }}
       viewer.get('canvas').zoom('fit-viewport');
@@ -255,3 +306,5 @@ Return only CSV rows."""
         csv_text = call_openai_rows(model, key, prompt)
         df = pd.read_csv(io.StringIO(csv_text))
         show_result(df, "agents.csv")
+
+
