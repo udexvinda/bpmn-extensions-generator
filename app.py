@@ -17,11 +17,13 @@ st.markdown("""
 NS = {"bpmn": "http://www.omg.org/spec/BPMN/20100524/MODEL"}
 
 def parse_named_tasks(bpmn_xml: str):
+    """Return list of {'element_id','element_name'} for each named task."""
     root = ET.fromstring(bpmn_xml.encode("utf-8"))
     out = []
     for el in root.findall(".//bpmn:task", NS):
-        tid = el.attrib.get("id","")
-        name = el.attrib.get("name") or el.attrib.get("{http://www.omg.org/spec/BPMN/20100524/MODEL}name","")
+        tid = el.attrib.get("id", "")
+        # name may come via namespace attr on some exporters
+        name = el.attrib.get("name") or el.attrib.get("{http://www.omg.org/spec/BPMN/20100524/MODEL}name", "")
         if name:
             out.append({"element_id": tid, "element_name": name})
     # de-dup by id
@@ -87,8 +89,9 @@ if not uploaded:
 bpmn_xml = uploaded.read().decode("utf-8", errors="ignore")
 tasks = parse_named_tasks(bpmn_xml)
 
-# ------------------ Render Diagram (Option A: no JS destructuring) ------------------
+# ------------------ Render Diagram (robust: check DI before import) ------------------
 st.subheader("Process Diagram")
+
 bpmn_html = f"""
 <div id="canvas"></div>
 <script src="https://unpkg.com/bpmn-js@10.2.1/dist/bpmn-viewer.production.min.js"></script>
@@ -98,30 +101,26 @@ bpmn_html = f"""
   const xmlIn = {json.dumps(bpmn_xml)};
   const viewer = new BpmnJS({{ container: '#canvas' }});
 
-  function hasDi(defs) {{
-    try {{
-      const di = defs.diagrams || [];
-      return Array.isArray(di) && di.length > 0;
-    }} catch (e) {{ return false; }}
-  }}
+  // Simple DI detection without internal APIs
+  const hasDI = /<\\s*bpmndi:BPMNDiagram[\\s>]/.test(xmlIn);
 
   (async () => {{
     try {{
-      await viewer.importXML(xmlIn);
-      const defs = viewer.get('canvas')._diagram._definitions;
-
-      if (!hasDi(defs)) {{
-        // No DI -> auto-layout using moddle + bpmn-auto-layout
+      if (hasDI) {{
+        // Already has DI — render directly
+        await viewer.importXML(xmlIn);
+      }} else {{
+        // No DI — produce layout and then render
         const moddle = new window.BpmnModdle();
         const res = await moddle.fromXML(xmlIn);
-        const rootElement = res.rootElement;   // <-- Option A (no destructuring)
+        const rootElement = res.rootElement; // Definitions
         const laid = await window.BpmnAutoLayout(rootElement);
         await viewer.importXML(laid.xml);
       }}
-
       viewer.get('canvas').zoom('fit-viewport');
     }} catch (err) {{
       const pre = document.createElement('pre');
+      pre.style.color = '#c00';
       pre.textContent = 'Render error: ' + (err && err.message ? err.message : err);
       document.body.appendChild(pre);
     }}
@@ -166,9 +165,8 @@ Given these tasks:
 
 Create a CSV with columns:
 element_id,element_name,kpi_key,current_value,target_value,owner,last_updated
-
 - Use snake_case for kpi_key.
-- current_value and target_value should be numeric or % where sensible.
+- current_value/target_value numeric or % where sensible.
 - last_updated: YYYY-MM-DD.
 Return only CSV rows (no markdown fences)."""
         csv_text = call_openai_rows(model, key, prompt)
@@ -186,7 +184,6 @@ For these tasks:
 
 Create a CSV with columns:
 element_id,element_name,risk_description,risk_category,likelihood_1to5,impact_1to5,mitigation_owner,control_ref
-
 Return only CSV rows."""
         csv_text = call_openai_rows(model, key, prompt)
         df = pd.read_csv(io.StringIO(csv_text))
@@ -210,7 +207,7 @@ Create 1-3 rows per task. Return only CSV rows."""
 
 # Controls
 with tabs[3]:
-    st.markdown("Generate **Controls** mapped to tasks (for SOX/ISO/etc.).")
+    st.markdown("Generate **Controls** mapped to tasks (SOX/ISO/etc.).")
     if st.button("Generate Controls"):
         key = need_key()
         prompt = f"""You are an internal controls specialist.
@@ -220,7 +217,7 @@ For these tasks:
 Create a CSV with columns:
 element_id,element_name,control_name,control_type,frequency,evidence_required,owner
 - control_type: Preventive/Detective/Corrective.
-- frequency: e.g., per_txn, daily, weekly, monthly.
+- frequency: per_txn, daily, weekly, monthly.
 Return only CSV rows."""
         csv_text = call_openai_rows(model, key, prompt)
         df = pd.read_csv(io.StringIO(csv_text))
