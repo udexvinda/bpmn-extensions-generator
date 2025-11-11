@@ -22,7 +22,6 @@ def parse_named_tasks(bpmn_xml: str):
     out = []
     for el in root.findall(".//bpmn:task", NS):
         tid = el.attrib.get("id", "")
-        # name may come via namespace attr on some exporters
         name = el.attrib.get("name") or el.attrib.get("{http://www.omg.org/spec/BPMN/20100524/MODEL}name", "")
         if name:
             out.append({"element_id": tid, "element_name": name})
@@ -89,32 +88,49 @@ if not uploaded:
 bpmn_xml = uploaded.read().decode("utf-8", errors="ignore")
 tasks = parse_named_tasks(bpmn_xml)
 
-# ------------------ Render Diagram (robust: check DI before import) ------------------
+# ------------------ Render Diagram (guard UMD & generate DI if missing) ------------------
 st.subheader("Process Diagram")
 
 bpmn_html = f"""
-<div id="canvas"></div>
+<div id="canvas" style="height:65vh;border:1px solid #ddd;border-radius:8px;"></div>
+
+<!-- Viewer -->
 <script src="https://unpkg.com/bpmn-js@10.2.1/dist/bpmn-viewer.production.min.js"></script>
-<script src="https://unpkg.com/bpmn-moddle@7.1.3/dist/index.umd.js"></script>
+
+<!-- Correct UMD for bpmn-moddle -->
+<script src="https://unpkg.com/bpmn-moddle@7.1.3/dist/bpmn-moddle.umd.js"></script>
+
+<!-- Auto layout -->
 <script src="https://unpkg.com/bpmn-auto-layout@0.7.0/dist/index.umd.js"></script>
+
 <script>
   const xmlIn = {json.dumps(bpmn_xml)};
   const viewer = new BpmnJS({{ container: '#canvas' }});
 
-  // Simple DI detection without internal APIs
+  // Resolve UMD shapes safely
+  const ModdleCtor =
+    (window.BpmnModdle && (window.BpmnModdle.BpmnModdle || window.BpmnModdle.default || window.BpmnModdle))
+    || null;
+
+  const autoLayoutFn =
+    (window.BpmnAutoLayout && (window.BpmnAutoLayout.layout || window.BpmnAutoLayout.default || window.BpmnAutoLayout))
+    || null;
+
+  // Simple DI detection
   const hasDI = /<\\s*bpmndi:BPMNDiagram[\\s>]/.test(xmlIn);
 
   (async () => {{
     try {{
       if (hasDI) {{
-        // Already has DI — render directly
         await viewer.importXML(xmlIn);
       }} else {{
-        // No DI — produce layout and then render
-        const moddle = new window.BpmnModdle();
-        const res = await moddle.fromXML(xmlIn);
-        const rootElement = res.rootElement; // Definitions
-        const laid = await window.BpmnAutoLayout(rootElement);
+        if (!ModdleCtor) throw new Error('BpmnModdle UMD not found');
+        if (!autoLayoutFn) throw new Error('BpmnAutoLayout UMD not found');
+
+        const moddle = new ModdleCtor();
+        const res = await moddle.fromXML(xmlIn);     // {{ rootElement, warnings }}
+        const rootElement = res.rootElement;         // Definitions
+        const laid = await autoLayoutFn(rootElement);// -> {{ xml }}
         await viewer.importXML(laid.xml);
       }}
       viewer.get('canvas').zoom('fit-viewport');
