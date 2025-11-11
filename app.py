@@ -137,7 +137,7 @@ def align_to_tasks(df: pd.DataFrame, tasks):
     return df.reset_index(drop=True)
 
 # ---------- Upload ----------
-st.title("BPMN → AI Tag Generator")
+st.title("BPMN → Extensions Generator")
 uploaded = st.file_uploader("Upload a .bpmn file (simple is fine — only bpmn:task is enough)", type=["bpmn"])
 
 # Tiny sample WITH DI (always renders)
@@ -355,6 +355,7 @@ Return clean CSV only (no code fences)."""
         except Exception as e:
             st.error(f"CSV parsing failed: {e}")
     show_table_with_download("controls", ctrl_cols, "controls.csv")
+
 
 
 
